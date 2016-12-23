@@ -1,0 +1,404 @@
+---
+title: "DATA 605 - Final"
+author: "Puneet Auluck"
+date: "December 23, 2016"
+output: html_document
+---
+
+
+Data source: https://www.kaggle.com/c/house-prices-advanced-regression-techniques
+
+X variable: LotArea <br>
+Y Variable: SalePrice
+
+```{r}
+# Load libraries 
+library(knitr)
+library(MASS)
+library(Hmisc)
+library(stats)
+library(psych)
+library(dplyr)
+
+# set exponential display off
+options(scipen = 999)
+
+```
+
+
+```{r}
+# Read data
+train <- read.csv('train.csv')
+
+# Extract X, Y variables
+X <- train$LotArea
+Y <- train$SalePrice
+
+# View in a table
+trainxy <- as.data.frame(cbind(X,Y))
+colnames(trainxy) <- c("LotArea", "SalePrice")
+kable(head(trainxy))
+
+```
+
+### Probability
+
+#### Pick x and y
+```{r}
+# x 3d quartile
+x<- summary(train$LotArea)[5]
+
+# y 2d quartile = median 
+y<- summary(train$SalePrice)[3]
+
+cat("3rd quartile of X (LotArea) = ",x,"\n")
+cat("2nd quartile of Y (SalePrice)= ",y)
+```
+
+#### (a) Calculate P(X>x|Y>y)
+
+```{r}
+p_Xgrx <- length(X[X>x])/length(X)
+p_Ygry <- length(Y[Y>y])/length(Y)
+p_Xgrx_and_Ygry <- nrow(trainxy[trainxy$LotArea >x & train$SalePrice>y,])/nrow(trainxy)
+p_Xgrx_gvn_Ygry <- p_Xgrx_and_Ygry/p_Ygry
+p_Xgrx_gvn_Ygry
+
+```
+
+Given house SalePrice is above the median price, there is 37.91% probability that LotArea will fall above 75% of the LotArea data provided, 
+
+
+#### (a) Calculate P(X>x,Y>y)
+
+```{r}
+# calculated above
+p_Xgrx_and_Ygry 
+
+```
+
+There 18.90% chance that LotArea is above 75th percentile with SalePrice above median.
+
+#### (a) Calculate P(X<x|Y>y)
+
+```{r}
+p_Xlex_and_Ygry <- nrow(trainxy[trainxy$LotArea <x & train$SalePrice>y,])/nrow(trainxy)
+p_Xlex_gvn_Ygry <- p_Xlex_and_Ygry/p_Ygry
+p_Xlex_gvn_Ygry
+
+```
+
+There is 62.09% chance the LotArea is below 75th percetile, given the SalePrice is greater than the median.
+
+#### (d) Table of counts
+
+```{r}
+# x<=3d quartile and y<=2d
+n_Xleqx_Yleqy <- nrow(subset(trainxy, LotArea <= x & SalePrice <= y))
+
+# x<=3d and y>2d 
+n_Xleqx_Ygry <- nrow(subset(trainxy, LotArea <= x & SalePrice > y))
+
+# x>3d quartile y<=2d 
+n_Xgrx_Yleqy <- nrow(subset(trainxy, LotArea > x & SalePrice <= y))
+
+# x>3d and y>2d
+n_Xgrx_Ygry <- nrow(subset(trainxy, LotArea > x & SalePrice > y))
+
+r1total <- sum(c(n_Xleqx_Yleqy,n_Xleqx_Ygry))
+r2total <- sum(c(n_Xgrx_Yleqy,n_Xgrx_Ygry))
+
+c1total <- sum(c(n_Xleqx_Yleqy,n_Xgrx_Yleqy))
+c2total <- sum(c(n_Xleqx_Ygry,n_Xgrx_Ygry))
+
+cnttable <- as.data.frame(rbind(c(n_Xleqx_Yleqy,n_Xleqx_Ygry, r1total),
+                  c(n_Xgrx_Yleqy,n_Xgrx_Ygry,r2total),
+                  c(c1total,c2total,sum(c(r1total,r2total)))))
+colnames(cnttable) <- c("2nd quartile", "2d quartile","Total")
+rownames(cnttable) <- c("<=3d quartile",">3d quartile","Total")
+kable(cnttable)
+
+```
+
+#### Check for dependency, ie: P(A|B) = P(A)P(B)
+
+```{r}
+p_A <- 365/1460
+p_B <- 728/1460
+p_A_and_B <- 276/1460
+p_A_gvn_B <- p_A_and_B/p_B
+p_AB <- p_A * p_B
+
+cat("P(A|B) = ",p_A_gvn_B,"\n")
+cat("P(A)P(B) = ", p_AB)
+
+
+```
+
+Since the P(A|B) $\ne$ P(A)P(B), the variables are not independent.
+
+#### Chi Square test for association
+
+```{r}
+# Chisq test
+
+tbl <- table(trainxy$LotArea, trainxy$SalePrice)
+chisq.test(tbl)
+
+```
+
+The p-value for chi-sq test is less than 0.05, we reject the assumption that these 2 variables are independent.
+
+### Descriptive and Inferential Statistics
+
+#### Provide univariate descriptive statistics for training data set
+
+```{r, results = 'asis'}
+stargazer::stargazer(train,type = "html")
+
+```
+
+
+#### correlation plot for some the square footages, price and year built
+
+```{r}
+train_plot <- dplyr::select(train,LotFrontage, 
+                               LotArea, 
+                               MasVnrArea, 
+                               TotalBsmtSF,
+                               X1stFlrSF,
+                               X2ndFlrSF,
+                               GrLivArea,
+                               YearBuilt,
+                               PoolArea,
+                               SalePrice)
+pairs.panels(train_plot)
+```
+
+#### Histogram for X and Y
+
+```{r}
+ggplot(data=train, aes(train$LotArea)) + 
+  geom_histogram(aes(y =..density..),breaks = seq(10, 50000, by =200), fill="blue", alpha=.2) +
+  geom_density(col=2) + 
+  labs(title="Histogram for LotArea") +
+  labs(x="LotArea", y="Count")
+
+ggplot(data=train, aes(train$SalePrice)) + 
+  geom_histogram(aes(y =..density..),breaks = seq(10, 500000, by =2000), fill="darkgreen", alpha=.2) +
+  geom_density(col=2) + 
+  labs(title="Histogram for SalePrice") +
+  labs(x="SalePrice", y="Count")
+
+hist(trainxy$LotArea)
+hist(trainxy$SalePrice)
+```
+
+#### Provide a scatterplot of X and Y
+
+```{r}
+hist(trainxy$LotArea, breaks=1000)
+hist(trainxy$SalePrice)
+library(ggplot2)
+qplot(LotArea, SalePrice, data=trainxy)
+
+trainxy_sub <- trainxy[trainxy$LotArea<50000,]
+qplot(LotArea, SalePrice, data=trainxy_sub)
+```
+
+#### Provide a 95% confidence interval for the difference in the mean of the variables
+
+```{r}
+t.test(trainxy$LotArea, trainxy$SalePrice, paired = TRUE)
+
+```
+
+
+The confidence interval at 95% is [-174378.4, -166430.4].  The p-value is below 0.05 significance level and we reject the hypothesis that there is no difference in means.
+
+
+#### Derive a correlation matrix for two of the quantitative variables you selected.
+```{r}
+cormatrix <- cor(trainxy)
+cormatrix
+```
+
+#### Test the hypothesis that the correlation between these variables is 0 and provide a 99% confidence interval
+
+```{r}
+cor.test(trainxy$LotArea, trainxy$SalePrice, conf.level = 0.99 )
+
+```
+
+The p-values is lower than 0.05 and reject null hypothesis, conclude with 99% confidence that there is a linear relationship between lot area and sale price of the house.
+
+### Linear Algebra and Correlation
+
+#### Invert your correlation matrix
+
+```{r}
+precision_matrix <- ginv(cormatrix)
+
+# multiply correlation matrix by the precision matrix, 
+# and then multiply the precision matrix by the correlation matrix
+
+cormatrix %*% precision_matrix %*% cormatrix
+```
+
+#### Conduct principle components analysis 
+
+In principle component analysis, data with large amount of variables transforms numbers by their correlation.  PCA works only with numeric data so I have subset data to consider only records that are numeric and do not have NA values.  The `princomp` function is used to do the principle analysis.
+
+```{r}
+
+library("Hmisc")
+
+# permorm imputation for missing values
+train$LotFrontage <- as.numeric(impute(train$LotFrontage, mean))
+train$MasVnrArea <- as.numeric(impute(train$MasVnrArea, mean))
+train$GarageYrBlt <- as.numeric(impute(train$GarageYrBlt, median))
+
+library(dplyr)
+
+#select only numeric data first
+train_num <- select_if(train, is.numeric)
+train_num <- train_num[,2:ncol(train_num)]
+#train_num <- train_num[complete.cases(train_num),]
+
+
+train_names <- paste(names(train_num), sep="")
+(train_fml <- as.formula(paste("~", paste(train_names, collapse=" +"))))
+train_imputed <- aregImpute(formula = train_fml, n.impute = 5, data=train_num, nk=0)
+train_complete <- train_num
+imputed <- impute.transcan(train_imputed, imputation=1, data=train_num, list.out=TRUE, pr=FALSE, check=FALSE)
+train_imputed[names(imputed)] <- imputed
+
+
+test_data <- read.csv('test.csv')
+test_num <- select_if(test_data, is.numeric)
+test_num <- test_num[,2:ncol(test_num)]
+test_names <- paste(names(test_num), sep="")
+(test_fml <- as.formula(paste("~", paste(test_names, collapse=" +"))))
+test_imputed <- aregImpute(formula = test_fml, n.impute = 5, data=test_num, nk=0)
+
+test_data$LotFrontage <- as.numeric(impute(test_data$LotFrontage, median))
+test_data$MasVnrArea <- as.numeric(impute(test_data$MasVnrArea, mean))
+test_data$BsmtFinSF1 <- as.numeric(impute(test_data$BsmtFinSF1, mean))
+test_data$BsmtFinSF2 <- as.numeric(impute(test_data$BsmtFinSF2, mean))
+test_data$BsmtUnfSF <- as.numeric(impute(test_data$BsmtUnfSF, mean))
+test_data$TotalBsmtSF <- as.numeric(impute(test_data$TotalBsmtSF, mean))
+test_data$BsmtFullBath <- as.numeric(impute(test_data$BsmtFullBath, median))
+test_data$BsmtHalfBath <- as.numeric(impute(test_data$BsmtHalfBath, median))
+test_data$GarageYrBlt <- as.numeric(impute(test_data$GarageYrBlt, median))
+test_data$GarageCars  <- as.numeric(impute(test_data$GarageCars , median))
+test_data$GarageArea  <- as.numeric(impute(test_data$GarageArea , mean))
+
+
+library(stats)
+pc <- princomp(train_num, cor=TRUE, scores = TRUE)
+plot(pc)
+summary(pc)
+
+
+```
+
+The component 1 explains roughly 21% variance in data.  Cumulative propotion from Component 1 through component 26 explains 95% of variance in the data.
+### Calculus-Based Probability & Statistics
+
+#### .  For your variable that is skewed to the right, shift it so that the minimum value is above zero.  Then load the MASS package and run fitdistr to fit an exponential probability density function.  
+```{r}
+
+LotArea_exp <- fitdistr(train$LotArea,"exponential")
+lambda <- LotArea_exp$estimate
+LotArea_exp_sample <- rexp(1000,lambda)
+hist(LotArea_exp_sample)
+hist(train[train$LotArea<50000,][5], breaks=10)
+```
+
+#### find the 5th and 95th percentiles using the cumulative distribution function (CDF)
+```{r}
+qexp(0.05, lambda, lower.tail=TRUE)
+qexp(0.95, lambda, lower.tail=TRUE)
+
+```
+
+#### generate a 95% confidence interval from the empirical data, assuming normality
+
+```{r}
+qnorm(0.95, mean(train$LotArea), sd(train$LotArea))
+quantile(train$LotArea, c(0.05,0.95))
+
+```
+### Modeling
+
+I will be using stepwise model selection strategies with backward-elimination.
+
+```{r}
+# separate data into training and actual values
+train_names <- names(train_num)
+train_names <- train_names[train_names != "SalePrice"]
+train_fmla <- as.formula(paste("SalePrice ~", paste(train_names, collapse="+")))
+fit <- lm(train_fmla, data=train_num)
+summary(fit)
+
+#plot(fit)
+```
+The NA co-efficient for TotalBsmtSF and GrLivArea means they cannot be estimated.  Excluding them will result in same fit.
+
+```{r}
+train_names <- train_names[!train_names %in% c('MSSubClass',
+                                               'LotFrontage',
+                                              'TotalBsmtSF',
+                                              'LowQualFinSF',
+                                              'GrLivArea',
+                                              'BsmtFullBath',
+                                              'BsmtHalfBath',
+                                              'FullBath',
+                                              'HalfBath',
+                                              'GarageYrBlt',
+                                              'WoodDeckSF',
+                                              'OpenPorchSF',
+                                              'EnclosedPorch',
+                                              'X3SsnPorch',
+                                              'MiscVal',
+                                              'MoSold',
+                                              'YrSold') ]
+
+
+train_fmla <- as.formula(paste("SalePrice ~", paste(train_names, collapse="+")))
+fit <- lm(formula = train_fmla, data=train)
+summary(fit)
+```
+
+```{r}
+train_names <- train_names[train_names != "PoolArea"]
+train_fmla <- as.formula(paste("SalePrice ~", paste(train_names, collapse="+")))
+fit <- lm(formula = train_fmla, data=train)
+summary(fit)
+#plot(fit)
+```
+
+```{r}
+train_names <- train_names[train_names != "ScreenPorch"]
+train_fmla <- as.formula(paste("SalePrice ~", paste(train_names, collapse="+")))
+fit <- lm(formula = train_fmla, data=train)
+summary(fit)
+plot(fit)
+
+test_predicted <- predict(fit, test_data)
+hist(test_predicted)
+#write.csv(cbind(test_data$Id, predict(fit, test_data)),"house_sale_price.csv", row.names = FALSE)
+
+
+
+```
+
+The first plot shows that there is small degree of non-linearity with the curve where some points go below 0.  We should have probabily normalized the data.  There are about 3 extreme values and if we exclude them, the data might show more linearity.
+
+The second plot has data beginning and end that are going off the line.  Ideally, all points should go on the line that would signify the model that is generated.
+
+The third plot shows us the distribution of residuals around the linear model.  Most prices range in the middle and less on the higher and lower end.
+
+The last plot shows the impact of model with extreme values.  In our case the extreme values do not deter the model in from the line.
+
+The model predicts Sale Price with test data and I have submitted on Kaggle under `Puneet Auluck` with score of 0.24823.
