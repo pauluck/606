@@ -180,7 +180,7 @@ pairs.panels(train_plot)
 
 ```{r}
 ggplot(data=train, aes(train$LotArea)) + 
-  geom_histogram(aes(y =..density..),breaks = seq(10, 50000, by =200), fill=I("blue"), alpha=.2) +
+  geom_histogram(aes(y =..density..),breaks = seq(10, 50000, by =200), fill=I("darkblue"), alpha=.2) +
   geom_density(col=2) + 
   labs(title="Histogram for LotArea") +
   labs(x="LotArea", y="Count")
