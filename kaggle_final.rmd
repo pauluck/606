@@ -19,6 +19,7 @@ library(Hmisc)
 library(stats)
 library(psych)
 library(dplyr)
+library(ggplot2)
 
 # set exponential display off
 options(scipen = 999)
@@ -179,7 +180,7 @@ pairs.panels(train_plot)
 
 ```{r}
 ggplot(data=train, aes(train$LotArea)) + 
-  geom_histogram(aes(y =..density..),breaks = seq(10, 50000, by =200), fill="blue", alpha=.2) +
+  geom_histogram(aes(y =..density..),breaks = seq(10, 50000, by =200), fill=I("blue"), alpha=.2) +
   geom_density(col=2) + 
   labs(title="Histogram for LotArea") +
   labs(x="LotArea", y="Count")
@@ -190,16 +191,12 @@ ggplot(data=train, aes(train$SalePrice)) +
   labs(title="Histogram for SalePrice") +
   labs(x="SalePrice", y="Count")
 
-hist(trainxy$LotArea)
-hist(trainxy$SalePrice)
 ```
 
 #### Provide a scatterplot of X and Y
 
 ```{r}
-hist(trainxy$LotArea, breaks=1000)
-hist(trainxy$SalePrice)
-library(ggplot2)
+
 qplot(LotArea, SalePrice, data=trainxy)
 
 trainxy_sub <- trainxy[trainxy$LotArea<50000,]
@@ -247,40 +244,139 @@ cormatrix %*% precision_matrix %*% cormatrix
 
 #### Conduct principle components analysis 
 
-In principle component analysis, data with large amount of variables transforms numbers by their correlation.  PCA works only with numeric data so I have subset data to consider only records that are numeric and do not have NA values.  The `princomp` function is used to do the principle analysis.
+In principle component analysis, data with large amount of variables transforms numbers by their correlation.  PCA works only with numeric data so I have subset data to consider only records that are numeric and NA values are imputed.  The `princomp` function is used to do the principle analysis.
 
 ```{r}
 
-library("Hmisc")
-
-# permorm imputation for missing values
+# traing data set imputation for missing values
 train$LotFrontage <- as.numeric(impute(train$LotFrontage, mean))
 train$MasVnrArea <- as.numeric(impute(train$MasVnrArea, mean))
 train$GarageYrBlt <- as.numeric(impute(train$GarageYrBlt, median))
 
-library(dplyr)
 
-#select only numeric data first
+
+# select only numeric data 
 train_num <- select_if(train, is.numeric)
 train_num <- train_num[,2:ncol(train_num)]
-#train_num <- train_num[complete.cases(train_num),]
+
+# do principle componenet analysis
+pc <- princomp(train_num, cor=TRUE, scores = TRUE)
+plot(pc)
+summary(pc)
+
+```
+
+The component 1 explains roughly 21% variance in data.  Cumulative propotion from Component 1 through component 26 explains 95% of variance in the data.
+
+### Calculus-Based Probability & Statistics
+
+#### For your variable that is skewed to the right, shift it so that the minimum value is above zero.  Then load the MASS package and run fitdistr to fit an exponential probability density function.  
+
+```{r}
+
+LotArea_exp <- fitdistr(train$LotArea,"exponential")
+lambda <- LotArea_exp$estimate
+LotArea_exp_sample <- as.data.frame(rexp(1000,lambda))
+colnames(LotArea_exp_sample) <- "LotArea"
 
 
-train_names <- paste(names(train_num), sep="")
-(train_fml <- as.formula(paste("~", paste(train_names, collapse=" +"))))
-train_imputed <- aregImpute(formula = train_fml, n.impute = 5, data=train_num, nk=0)
-train_complete <- train_num
-imputed <- impute.transcan(train_imputed, imputation=1, data=train_num, list.out=TRUE, pr=FALSE, check=FALSE)
-train_imputed[names(imputed)] <- imputed
+ggplot(data=LotArea_exp_sample, aes(LotArea_exp_sample$LotArea)) + 
+  geom_histogram(breaks = seq(10, 50000, by =300), fill="blue", alpha=.2) +
+  labs(title="Exponential Distribution for LotArea") +
+  labs(x="LotArea", y="Count")
 
 
+train_lotarea_sub <- train[train$LotArea<50000,]
+ggplot(data=train_lotarea_sub, aes(train_lotarea_sub$LotArea)) + 
+  geom_histogram(breaks = seq(10, 50000, by =200), fill="blue", alpha=.2) +
+  labs(title="Original Distribution for LotArea") +
+  labs(x="LotArea", y="Count")
+
+```
+
+#### find the 5th and 95th percentiles using the cumulative distribution function (CDF)
+
+```{r}
+quantile(LotArea_exp_sample$LotArea, c(0.05,0.95))
+quantile(train$LotArea, c(0.05,0.95))
+```
+
+#### generate a 95% confidence interval from the empirical data, assuming normality
+
+```{r}
+qnorm(0.95, mean(train$LotArea), sd(train$LotArea))
+
+```
+
+### Modeling
+
+I will be using stepwise model selection strategy with backward-elimination.
+
+```{r}
+
+# separate data into training and actual values
+train_names <- names(train_num)
+train_names <- train_names[train_names != "SalePrice"]
+train_fmla <- as.formula(paste("SalePrice ~", paste(train_names, collapse="+")))
+fit <- lm(train_fmla, data=train_num)
+summary(fit)
+
+```
+
+The NA co-efficient for TotalBsmtSF and GrLivArea means they cannot be estimated.  Excluding them will result in same fit.
+
+```{r}
+train_names <- train_names[!train_names %in% c('LotFrontage',
+                                               'YearRemodAdd',
+                                              'BsmtFinSF2',
+                                              'TotalBsmtSF',
+                                              'LowQualFinSF',
+                                              'GrLivArea',
+                                              'BsmtHalfBath',
+                                              'FullBath',
+                                              'HalfBath',
+                                              'GarageYrBlt',
+                                              'GarageArea',
+                                              'OpenPorchSF',
+                                              'EnclosedPorch',
+                                              'X3SsnPorch',
+                                              'ScreenPorch',
+                                              'PoolArea',
+                                              'MiscVal',
+                                              'MoSold',
+                                              'YrSold') ]
+
+
+train_fmla <- as.formula(paste("SalePrice ~", paste(train_names, collapse="+")))
+fit <- lm(formula = train_fmla, data=train)
+summary(fit)
+```
+
+
+```{r}
+# Let's plot the fit
+plot(fit)
+
+```
+
+The first plot shows that there is a small degree of non-linearity with the curve where some points go below 0.  We should have probably normalized the data.  There are about 3 extreme values and if we exclude them, the data might show more linearity.
+
+The second plot has data beginning and end that are going off the line.  Ideally, all points should go on the line that would signify the model that is generated.
+
+The third plot shows us the distribution of residuals around the linear model.  Most prices range in the middle and less on the higher and lower end.
+
+The last plot shows the impact of model with extreme values.  In our case the extreme values do not deter the model in from the line.
+
+
+#### Run the model against the test data.
+```{r}
+# Read the file
 test_data <- read.csv('test.csv')
-test_num <- select_if(test_data, is.numeric)
-test_num <- test_num[,2:ncol(test_num)]
-test_names <- paste(names(test_num), sep="")
-(test_fml <- as.formula(paste("~", paste(test_names, collapse=" +"))))
-test_imputed <- aregImpute(formula = test_fml, n.impute = 5, data=test_num, nk=0)
 
+# Select only numeric columns
+test_num <- select_if(test_data, is.numeric)
+
+# Impute columns with NA values
 test_data$LotFrontage <- as.numeric(impute(test_data$LotFrontage, median))
 test_data$MasVnrArea <- as.numeric(impute(test_data$MasVnrArea, mean))
 test_data$BsmtFinSF1 <- as.numeric(impute(test_data$BsmtFinSF1, mean))
@@ -293,112 +389,21 @@ test_data$GarageYrBlt <- as.numeric(impute(test_data$GarageYrBlt, median))
 test_data$GarageCars  <- as.numeric(impute(test_data$GarageCars , median))
 test_data$GarageArea  <- as.numeric(impute(test_data$GarageArea , mean))
 
-
-library(stats)
-pc <- princomp(train_num, cor=TRUE, scores = TRUE)
-plot(pc)
-summary(pc)
-
-
-```
-
-The component 1 explains roughly 21% variance in data.  Cumulative propotion from Component 1 through component 26 explains 95% of variance in the data.
-### Calculus-Based Probability & Statistics
-
-#### .  For your variable that is skewed to the right, shift it so that the minimum value is above zero.  Then load the MASS package and run fitdistr to fit an exponential probability density function.  
-```{r}
-
-LotArea_exp <- fitdistr(train$LotArea,"exponential")
-lambda <- LotArea_exp$estimate
-LotArea_exp_sample <- rexp(1000,lambda)
-hist(LotArea_exp_sample)
-hist(train[train$LotArea<50000,][5], breaks=10)
-```
-
-#### find the 5th and 95th percentiles using the cumulative distribution function (CDF)
-```{r}
-qexp(0.05, lambda, lower.tail=TRUE)
-qexp(0.95, lambda, lower.tail=TRUE)
-
-```
-
-#### generate a 95% confidence interval from the empirical data, assuming normality
-
-```{r}
-qnorm(0.95, mean(train$LotArea), sd(train$LotArea))
-quantile(train$LotArea, c(0.05,0.95))
-
-```
-### Modeling
-
-I will be using stepwise model selection strategies with backward-elimination.
-
-```{r}
-# separate data into training and actual values
-train_names <- names(train_num)
-train_names <- train_names[train_names != "SalePrice"]
-train_fmla <- as.formula(paste("SalePrice ~", paste(train_names, collapse="+")))
-fit <- lm(train_fmla, data=train_num)
-summary(fit)
-
-#plot(fit)
-```
-The NA co-efficient for TotalBsmtSF and GrLivArea means they cannot be estimated.  Excluding them will result in same fit.
-
-```{r}
-train_names <- train_names[!train_names %in% c('MSSubClass',
-                                               'LotFrontage',
-                                              'TotalBsmtSF',
-                                              'LowQualFinSF',
-                                              'GrLivArea',
-                                              'BsmtFullBath',
-                                              'BsmtHalfBath',
-                                              'FullBath',
-                                              'HalfBath',
-                                              'GarageYrBlt',
-                                              'WoodDeckSF',
-                                              'OpenPorchSF',
-                                              'EnclosedPorch',
-                                              'X3SsnPorch',
-                                              'MiscVal',
-                                              'MoSold',
-                                              'YrSold') ]
-
-
-train_fmla <- as.formula(paste("SalePrice ~", paste(train_names, collapse="+")))
-fit <- lm(formula = train_fmla, data=train)
-summary(fit)
-```
-
-```{r}
-train_names <- train_names[train_names != "PoolArea"]
-train_fmla <- as.formula(paste("SalePrice ~", paste(train_names, collapse="+")))
-fit <- lm(formula = train_fmla, data=train)
-summary(fit)
-#plot(fit)
-```
-
-```{r}
-train_names <- train_names[train_names != "ScreenPorch"]
-train_fmla <- as.formula(paste("SalePrice ~", paste(train_names, collapse="+")))
-fit <- lm(formula = train_fmla, data=train)
-summary(fit)
-plot(fit)
-
-test_predicted <- predict(fit, test_data)
-hist(test_predicted)
+test_predicted <- as.data.frame(predict(fit, test_data))
+colnames(test_predicted) <- "LotArea"
+# hist(test_predicted)
 #write.csv(cbind(test_data$Id, predict(fit, test_data)),"house_sale_price.csv", row.names = FALSE)
 
+qplot(test_predicted,
+      geom="histogram",
+      main = "Predicted SalePrice Distribution", 
+      xlab = "test_predicted",  
+      fill=I("darkgreen"),
+      col = I('red'),alpha=I(.2))
+
 
 
 ```
 
-The first plot shows that there is small degree of non-linearity with the curve where some points go below 0.  We should have probabily normalized the data.  There are about 3 extreme values and if we exclude them, the data might show more linearity.
 
-The second plot has data beginning and end that are going off the line.  Ideally, all points should go on the line that would signify the model that is generated.
-
-The third plot shows us the distribution of residuals around the linear model.  Most prices range in the middle and less on the higher and lower end.
-
-The last plot shows the impact of model with extreme values.  In our case the extreme values do not deter the model in from the line.
-
-The model predicts Sale Price with test data and I have submitted on Kaggle under `Puneet Auluck` with score of 0.24823.
+The model predicts Sale Price with test data and I have submitted on Kaggle under `Puneet Auluck` with score of `0.24823`.
